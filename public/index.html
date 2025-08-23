@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic Smart Wallet - Account Abstraction</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🎵 Sonic Smart Wallet</h1>
+            <p>Smart Wallet com Account Abstraction (EIP-4337) e Passkeys</p>
+            <div class="network-info">
+                <span class="network-badge">Sonic Testnet</span>
+                <span class="status-indicator" id="networkStatus">🔴 Desconectado</span>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Seção de Autenticação -->
+            <section class="auth-section" id="authSection">
+                <div class="card">
+                    <h2>🔐 Autenticação</h2>
+                    <div class="auth-buttons">
+                        <button class="btn btn-primary" id="createAccountBtn">
+                            ➕ Criar Conta com Passkey
+                        </button>
+                        <button class="btn btn-secondary" id="loginBtn">
+                            🔑 Conectar com Passkey
+                        </button>
+                        <button class="btn btn-secondary" id="toggleDebugBtn" style="font-size: 0.8rem;">
+                            🔧 Debug
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Seção da Carteira -->
+            <section class="wallet-section hidden" id="walletSection">
+                <div class="card">
+                    <h2>💼 Sua Smart Wallet</h2>
+                    
+                    <div class="wallet-info">
+                        <div class="address-container">
+                            <label>Endereço da Carteira:</label>
+                            <div class="address-display">
+                                <span id="walletAddress">0x...</span>
+                                <button class="btn-icon" id="copyAddressBtn" title="Copiar endereço">
+                                    📋
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="balance-container">
+                            <label>Saldo:</label>
+                            <div class="balance-display">
+                                <span id="walletBalance">0.0000</span>
+                                <span class="currency">S</span>
+                                <button class="btn-icon" id="refreshBalanceBtn" title="Atualizar saldo">
+                                    🔄
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="faucet-info">
+                        <p>💧 Precisa de tokens de teste? 
+                            <a href="https://testnet.soniclabs.com/account" target="_blank" class="faucet-link">
+                                Acesse o Faucet da Sonic
+                            </a>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Seção de Envio -->
+                <div class="card">
+                    <h2>💸 Enviar Transação</h2>
+                    
+                    <form class="send-form" id="sendForm">
+                        <div class="form-group">
+                            <label for="recipientAddress">Endereço de Destino:</label>
+                            <input 
+                                type="text" 
+                                id="recipientAddress" 
+                                placeholder="0x..." 
+                                required
+                            >
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="sendAmount">Quantidade (S):</label>
+                            <input 
+                                type="number" 
+                                id="sendAmount" 
+                                placeholder="0.001" 
+                                step="0.0001" 
+                                min="0" 
+                                required
+                            >
+                        </div>
+                        
+                        <div class="gas-info" id="gasInfo">
+                            <small>⛽ Gas estimado: <span id="gasEstimate">Calculando...</span></small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" id="sendBtn">
+                            🚀 Enviar Transação
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Histórico de Transações -->
+                <div class="card">
+                    <h2>📋 Histórico de Transações</h2>
+                    <div class="transaction-history" id="transactionHistory">
+                        <p class="no-transactions">Nenhuma transação ainda</p>
+                    </div>
+                </div>
+
+                <div class="logout-container">
+                    <button class="btn btn-danger" id="logoutBtn">
+                        🚪 Desconectar
+                    </button>
+                </div>
+
+                <!-- Debug Section (oculta por padrão) -->
+                <div class="card debug-section hidden" id="debugSection">
+                    <h2>🔧 Debug</h2>
+                    <div class="debug-buttons">
+                        <button class="btn btn-secondary" id="debugCredsBtn">
+                            📊 Mostrar Credenciais
+                        </button>
+                        <button class="btn btn-secondary" id="clearCredsBtn">
+                            🗑️ Limpar Tudo
+                        </button>
+                        <button class="btn btn-secondary" id="testPasskeyBtn">
+                            🧪 Testar Passkey
+                        </button>
+                    </div>
+                    <div class="debug-info" id="debugInfo">
+                        <p>Clique nos botões acima para debug</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Modal de Loading -->
+        <div class="modal hidden" id="loadingModal">
+            <div class="modal-content">
+                <div class="loader"></div>
+                <p id="loadingText">Processando...</p>
+            </div>
+        </div>
+
+        <!-- Modal de Sucesso/Erro -->
+        <div class="modal hidden" id="messageModal">
+            <div class="modal-content">
+                <div class="message-icon" id="messageIcon">✅</div>
+                <h3 id="messageTitle">Sucesso!</h3>
+                <p id="messageText">Operação realizada com sucesso.</p>
+                <button class="btn btn-primary" id="closeModalBtn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>Desenvolvido com ❤️ para a Sonic Testnet | 
+            <a href="https://testnet.sonicscan.org" target="_blank">Explorer</a>
+        </p>
+    </footer>
+
+    <script src="wallet.js"></script>
+</body>
+</html>
