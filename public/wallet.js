@@ -442,37 +442,47 @@ async function estimateGas(to, amount) {
     }
 }
 
-// Função para enviar transação (simulada para Account Abstraction)
+// Função para enviar transação real na Sonic Testnet
 async function sendTransaction(to, amount) {
     try {
-        showLoading('Enviando transação...');
+        showLoading('Autenticando com passkey...');
         
-        // Simular assinatura com passkey
-        await smartWallet.passkeyManager.authenticate();
+        // Autenticar com passkey para autorização
+        const assertion = await smartWallet.passkeyManager.authenticate();
+        console.log('✅ Passkey autorizada para transação');
         
-        // Simular envio de UserOperation (EIP-4337)
-        // Em uma implementação real, isso seria enviado para um bundler
-        const userOp = {
-            sender: currentAccount.address,
-            to: to,
-            value: amount,
-            timestamp: Date.now(),
-            nonce: transactions.length
-        };
+        showLoading('Enviando transação para a Sonic Testnet...');
         
-        // Simular hash da transação
-        const txHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
+        // Enviar transação real via backend
+        const response = await fetch('/api/send-transaction', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                to: to,
+                amount: amount,
+                credentialId: assertion.id
+            })
+        });
+        
+        const data = await response.json();
+        console.log('📡 Resposta da transação:', data);
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro ao enviar transação');
+        }
         
         const transaction = {
-            hash: txHash,
-            from: currentAccount.address,
-            to: to,
-            value: amount,
+            hash: data.transactionHash,
+            from: data.from,
+            to: data.to,
+            value: data.value,
             status: 'success',
             timestamp: Date.now(),
-            explorerUrl: `${SONIC_CONFIG.explorer}/tx/${txHash}`
+            explorerUrl: data.explorerUrl,
+            gasUsed: data.gasUsed,
+            isReal: true // Flag para indicar que é uma transação real
         };
         
         transactions.unshift(transaction);
@@ -481,18 +491,20 @@ async function sendTransaction(to, amount) {
         hideLoading();
         
         showMessage(
-            'Transação Enviada!', 
-            `Hash: ${txHash.substring(0, 10)}...`
+            'Transação Enviada com Sucesso!', 
+            `Hash: ${data.transactionHash.substring(0, 10)}... | Clique para ver no explorer`,
+            false
         );
         
         // Atualizar saldo após alguns segundos
         setTimeout(() => {
             updateBalance();
-        }, 2000);
+        }, 3000);
         
         return transaction;
     } catch (error) {
         hideLoading();
+        console.error('❌ Erro ao enviar transação:', error);
         throw error;
     }
 }
@@ -509,11 +521,18 @@ function updateTransactionHistory() {
     container.innerHTML = transactions.map(tx => `
         <div class="transaction-item ${tx.status}">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                <strong>${tx.status === 'success' ? '✅' : '⏳'} ${tx.value} S</strong>
+                <strong>${tx.status === 'success' ? '✅' : '⏳'} ${tx.value} S ${tx.isReal ? '🌐' : '🎭'}</strong>
                 <small>${new Date(tx.timestamp).toLocaleString('pt-BR')}</small>
             </div>
-            <div style="font-size: 0.9rem; color: #666;">
-                Para: ${tx.to.substring(0, 10)}...${tx.to.substring(-8)}
+            <div style="font-size: 0.9rem; color: #666; margin-bottom: 3px;">
+                De: ${tx.from ? tx.from.substring(0, 10) + '...' + tx.from.substring(-6) : 'N/A'}
+            </div>
+            <div style="font-size: 0.9rem; color: #666; margin-bottom: 5px;">
+                Para: ${tx.to.substring(0, 10)}...${tx.to.substring(-6)}
+            </div>
+            ${tx.gasUsed ? `<div style="font-size: 0.8rem; color: #888; margin-bottom: 3px;">⛽ Gas: ${parseInt(tx.gasUsed).toLocaleString()} units</div>` : ''}
+            <div style="font-size: 0.8rem; color: ${tx.isReal ? '#28a745' : '#ffc107'}; margin-bottom: 3px;">
+                ${tx.isReal ? '🌐 Transação Real na Sonic Testnet' : '🎭 Transação Simulada'}
             </div>
             <div class="transaction-hash" style="margin-top: 5px;">
                 <a href="${tx.explorerUrl}" target="_blank" style="color: #667eea; text-decoration: none;">
@@ -627,23 +646,79 @@ document.addEventListener('DOMContentLoaded', async () => {
     const amountInput = document.getElementById('sendAmount');
     const addressInput = document.getElementById('recipientAddress');
     
+    const validateAddress = async (address) => {
+        if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+            return null;
+        }
+        
+        try {
+            const response = await fetch('/api/validate-address', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address })
+            });
+            
+            const data = await response.json();
+            return response.ok ? data : null;
+        } catch (error) {
+            console.error('Erro ao validar endereço:', error);
+            return null;
+        }
+    };
+
     const updateGasEstimate = async () => {
         const amount = amountInput.value;
         const address = addressInput.value;
+        const gasEstimateEl = document.getElementById('gasEstimate');
         
-        if (amount && address && /^0x[a-fA-F0-9]{40}$/.test(address)) {
+        if (!amount || !address) {
+            gasEstimateEl.textContent = 'Preencha os campos acima';
+            return;
+        }
+        
+        if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+            gasEstimateEl.innerHTML = '❌ Formato de endereço inválido';
+            return;
+        }
+        
+        gasEstimateEl.textContent = 'Validando endereço...';
+        
+        // Validar endereço primeiro
+        const addressInfo = await validateAddress(address);
+        if (!addressInfo) {
+            gasEstimateEl.innerHTML = '❌ Erro ao validar endereço';
+            return;
+        }
+        
+        // Mostrar informações do endereço
+        const statusIcon = addressInfo.hasActivity ? '✅' : '⚠️';
+        const statusText = addressInfo.hasActivity ? 'Ativo' : 'Novo';
+        const contractText = addressInfo.isContract ? ' (Contrato)' : '';
+        
+        gasEstimateEl.innerHTML = `
+            ${statusIcon} ${statusText}${contractText}<br>
+            💰 Saldo: ${parseFloat(addressInfo.balance).toFixed(4)} S<br>
+            📊 Transações: ${addressInfo.transactionCount}
+        `;
+        
+        // Estimar gas se tudo estiver válido
+        if (amount && parseFloat(amount) > 0) {
             const gasData = await estimateGas(address, amount);
             if (gasData) {
-                document.getElementById('gasEstimate').textContent = 
-                    `${parseInt(gasData.gasLimit).toLocaleString()} units`;
+                gasEstimateEl.innerHTML += `<br>⛽ Gas: ${parseInt(gasData.gasLimit).toLocaleString()} units`;
             }
-        } else {
-            document.getElementById('gasEstimate').textContent = 'Calculando...';
         }
     };
     
-    amountInput.addEventListener('input', updateGasEstimate);
-    addressInput.addEventListener('input', updateGasEstimate);
+    // Debounce para evitar muitas chamadas à API
+    let debounceTimer;
+    const debouncedUpdate = () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(updateGasEstimate, 500); // 500ms delay
+    };
+    
+    amountInput.addEventListener('input', debouncedUpdate);
+    addressInput.addEventListener('input', debouncedUpdate);
     
     // Fechar modal
     document.getElementById('closeModalBtn').addEventListener('click', hideMessage);
@@ -766,6 +841,73 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             document.getElementById('debugInfo').innerHTML = `
                 <h4>❌ Erro ao buscar contas:</h4>
+                <strong>Erro:</strong> ${error.message}
+            `;
+        }
+    });
+
+    document.getElementById('showPrivateKeyBtn').addEventListener('click', async () => {
+        if (!currentAccount) {
+            showMessage('Erro', 'Você precisa estar conectado para ver a chave privada', true);
+            return;
+        }
+
+        if (!confirm('⚠️ ATENÇÃO: A chave privada será mostrada na tela. Certifique-se de que ninguém está olhando. Continuar?')) {
+            return;
+        }
+
+        try {
+            showLoading('Obtendo chave privada...');
+            
+            const response = await fetch('/api/account/private-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credentialId: currentAccount.credentialId })
+            });
+            
+            const data = await response.json();
+            
+            hideLoading();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Erro ao obter chave privada');
+            }
+            
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.innerHTML = `
+                <h4>🔑 Chave Privada da Carteira:</h4>
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border: 2px solid #ffc107; margin: 10px 0;">
+                    <strong>⚠️ ${data.warning}</strong>
+                </div>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; font-family: monospace;">
+                    <strong>🆔 Credential ID:</strong><br>
+                    <code style="word-break: break-all;">${data.credentialId}</code><br><br>
+                    <strong>💼 Endereço:</strong><br>
+                    <code>${data.address}</code><br><br>
+                    <strong>🔑 Chave Privada:</strong><br>
+                    <code style="word-break: break-all;">${data.privateKey}</code>
+                </div>
+                <div style="background: #d4edda; padding: 15px; border-radius: 8px; border: 2px solid #28a745; margin: 10px 0;">
+                    <strong>💡 Como usar:</strong><br>
+                    1. Copie a chave privada acima<br>
+                    2. Acesse: <a href="https://testnet.soniclabs.com/account" target="_blank">Sonic Faucet</a><br>
+                    3. Importe a chave privada na MetaMask<br>
+                    4. Solicite tokens do faucet<br>
+                    5. Use os tokens para fazer transações reais!
+                </div>
+                <button onclick="navigator.clipboard.writeText('${data.privateKey}')" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin: 5px;">
+                    📋 Copiar Chave Privada
+                </button>
+                <button onclick="navigator.clipboard.writeText('${data.address}')" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin: 5px;">
+                    📋 Copiar Endereço
+                </button>
+            `;
+        } catch (error) {
+            hideLoading();
+            showMessage('Erro', error.message, true);
+            
+            document.getElementById('debugInfo').innerHTML = `
+                <h4>❌ Erro ao obter chave privada:</h4>
                 <strong>Erro:</strong> ${error.message}
             `;
         }
