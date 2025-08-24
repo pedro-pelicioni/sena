@@ -49,11 +49,12 @@ class PasskeyManager {
                     ],
                     authenticatorSelection: {
                         authenticatorAttachment: 'platform',
-                        userVerification: 'required',
-                        residentKey: 'required'
+                        userVerification: 'preferred',
+                        residentKey: 'preferred',
+                        requireResidentKey: false
                     },
                     timeout: 60000,
-                    attestation: 'direct'
+                    attestation: 'none'
                 }
             };
 
@@ -105,7 +106,7 @@ class PasskeyManager {
                         id: rawIdBuffer,
                         type: 'public-key'
                     }],
-                    userVerification: 'required',
+                    userVerification: 'preferred',
                     timeout: 60000
                 }
             };
@@ -138,7 +139,7 @@ class PasskeyManager {
                 publicKey: {
                     challenge: challenge,
                     // Não especificar allowCredentials permite descoberta automática
-                    userVerification: 'required',
+                    userVerification: 'preferred',
                     timeout: 60000
                 }
             };
@@ -236,21 +237,37 @@ class SmartWalletManager {
             showLoading('Criando sua conta com passkey...');
             
             const credential = await this.passkeyManager.createCredential(username);
-            const walletAddress = await this.generateWalletAddress(credential);
+            console.log('✅ Credencial criada:', credential);
             
-            const accountData = {
-                address: walletAddress,
-                username: username,
-                credentialId: credential.id,
-                createdAt: Date.now()
-            };
+            // Salvar conta no backend
+            const response = await fetch('/api/account/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    credentialId: credential.id,
+                    username: username
+                })
+            });
             
+            const data = await response.json();
+            console.log('📡 Resposta do servidor (create):', data);
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Erro ao criar conta no servidor');
+            }
+            
+            const accountData = data.account;
+            
+            // Salvar conta localmente também
             localStorage.setItem('sonic_wallet_account', JSON.stringify(accountData));
             
             hideLoading();
             return accountData;
         } catch (error) {
             hideLoading();
+            console.error('❌ Erro ao criar conta:', error);
             throw error;
         }
     }
@@ -260,19 +277,45 @@ class SmartWalletManager {
         try {
             showLoading('Conectando com sua passkey...');
             
+            // Primeiro, autenticar com passkey
             const assertion = await this.passkeyManager.authenticate();
-            const storedAccount = localStorage.getItem('sonic_wallet_account');
+            console.log('✅ Passkey autenticada:', assertion);
             
-            if (!storedAccount) {
-                throw new Error('Conta não encontrada');
+            // Tentar recuperar conta do backend usando credential ID
+            const response = await fetch('/api/account/retrieve', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    credentialId: assertion.id
+                })
+            });
+            
+            const data = await response.json();
+            console.log('📡 Resposta do servidor (retrieve):', data);
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Erro ao recuperar conta');
             }
             
-            const accountData = JSON.parse(storedAccount);
+            const accountData = data.account;
+            
+            // Salvar conta localmente
+            localStorage.setItem('sonic_wallet_account', JSON.stringify(accountData));
+            
+            if (data.isNewRecovery) {
+                console.log('🔄 Conta recuperada automaticamente');
+                setTimeout(() => {
+                    showMessage('Conta Recuperada!', 'Sua conta foi recuperada automaticamente com base na sua passkey');
+                }, 1000);
+            }
             
             hideLoading();
             return accountData;
         } catch (error) {
             hideLoading();
+            console.error('❌ Erro ao conectar conta:', error);
             throw error;
         }
     }
@@ -531,6 +574,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('loginBtn').addEventListener('click', async () => {
         try {
             currentAccount = await smartWallet.connectAccount();
+            console.log(currentAccount);
             showWalletSection();
             showMessage('Conectado!', 'Bem-vindo de volta!');
         } catch (error) {
@@ -682,6 +726,47 @@ document.addEventListener('DOMContentLoaded', async () => {
                 • Certifique-se de que está em um contexto seguro (HTTPS ou localhost)
                 • Tente limpar as credenciais e criar uma nova conta
                 • Verifique se seu dispositivo suporta WebAuthn
+            `;
+        }
+    });
+
+    document.getElementById('listAccountsBtn').addEventListener('click', async () => {
+        try {
+            showLoading('Buscando contas no servidor...');
+            
+            const response = await fetch('/api/accounts/debug');
+            const data = await response.json();
+            
+            hideLoading();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Erro ao buscar contas');
+            }
+            
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.innerHTML = `
+                <h4>📋 Contas no Servidor (${data.total}):</h4>
+                ${data.accounts.length === 0 ? 
+                    '<p>Nenhuma conta encontrada no servidor</p>' :
+                    data.accounts.map(account => `
+                        <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                            <strong>👤 ${account.username}</strong><br>
+                            <strong>🆔 Credential ID:</strong> ${account.credentialId.substring(0, 20)}...<br>
+                            <strong>💼 Endereço:</strong> ${account.address}<br>
+                            <strong>📅 Criado em:</strong> ${new Date(account.createdAt).toLocaleString('pt-BR')}<br>
+                            <strong>🕒 Último acesso:</strong> ${new Date(account.lastAccess).toLocaleString('pt-BR')}<br>
+                            ${account.recovered ? '<strong>🔄 Conta Recuperada</strong><br>' : ''}
+                        </div>
+                    `).join('')
+                }
+            `;
+        } catch (error) {
+            hideLoading();
+            showMessage('Erro', error.message, true);
+            
+            document.getElementById('debugInfo').innerHTML = `
+                <h4>❌ Erro ao buscar contas:</h4>
+                <strong>Erro:</strong> ${error.message}
             `;
         }
     });
